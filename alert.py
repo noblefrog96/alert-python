@@ -48,8 +48,13 @@ posts = []
 for el in elements:
     title = el.find_element(By.CSS_SELECTOR, 'span.list_tit').text.strip()
     raw_href = el.find_element(By.TAG_NAME, 'a').get_attribute('href')
+
+    if raw_href.startswith("javascript:goView"):
     m = re.search(r"goView\((\d+)\)", raw_href)
     post_id = m.group(1) if m else raw_href
+    post_url = f"https://korhq.ffwp.org/official/?mode=view&pageType=officialList&sPage=1&sType=ffwp&sCategory=&listSearch=&document={post_id}#contents"  # 실제 URL 형식으로 수정
+    else:
+        post_url = raw_href
     posts.append({'id': post_id, 'title': title, 'href': raw_href})
 driver.quit()
 
