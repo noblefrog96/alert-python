@@ -27,5 +27,13 @@ jobs:
         FFWP_USER: ${{ secrets.FFWP_USER }}
         FFWP_PW: ${{ secrets.FFWP_PW }}
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
       run: |
+        # Git 인증을 위한 설정
+        git config --global user.name "noblefrog96"
+        git config --global user.email "noblefrog96@gmail.com"
+        
+        git config --global credential.helper store
+        echo "https://your-github-username:${{ secrets.GH_PAT }}@github.com" > ~/.git-credentials
+        
         python alert.py
