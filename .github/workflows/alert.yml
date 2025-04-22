@@ -2,7 +2,7 @@ name: 게시판 알림
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 매일 00:00 UTC에 실행 (필요에 따라 시간 수정)
+    - cron: '*/5 * * * *'  # 5분마다 실행
   workflow_dispatch:  # 수동 실행을 위해 추가
 
 jobs:
