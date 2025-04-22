@@ -1,0 +1,31 @@
+name: 게시판 알림
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 매일 00:00 UTC에 실행 (필요에 따라 시간 수정)
+  workflow_dispatch:  # 수동 실행을 위해 추가
+
+jobs:
+  check_posts:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
+
+    - name: Install dependencies
+      run: |
+        pip install selenium requests
+
+    - name: Run alert script
+      env:
+        FFWP_USER: ${{ secrets.FFWP_USER }}
+        FFWP_PW: ${{ secrets.FFWP_PW }}
+        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      run: |
+        python alert.py
