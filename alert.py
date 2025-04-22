@@ -47,4 +47,10 @@ elements = driver.find_elements(By.CSS_SELECTOR, 'ul.pub_list li.c_list_tr')
 posts = []
 for el in elements:
     title = el.find_element(By.CSS_SELECTOR, 'span.list_tit').text.strip()
-    raw_href = el.find_element(By.TAG_NAME, 'a')._
+    raw_href = el.find_element(By.TAG_NAME, 'a').get_attribute('href')  # .get_attribute('href')로 수정
+
+    if raw_href.startswith("javascript:goView"):
+        # goView(10272)에서 10272를 추출
+        m = re.search(r"goView\((\d+)\)", raw_href)
+        post_id = m.group(1) if m else raw_href
+        post_url = f"https://korhq_
