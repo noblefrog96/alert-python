@@ -29,11 +29,11 @@ jobs:
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         GH_TOKEN: ${{ secrets.GH_TOKEN }}
       run: |
-        # Git 인증을 위한 설정
+        # Git 사용자 설정
         git config --global user.name "noblefrog96"
         git config --global user.email "noblefrog96@gmail.com"
         
-        git config --global credential.helper store
-        echo "https://your-github-username:${{ secrets.GH_PAT }}@github.com" > ~/.git-credentials
+        # 인증 정보 설정
+        echo "https://noblefrog96:${GH_PAT}@github.com/noblefrog96/your-repo-name.git" > ~/.git-credentials
         
         python alert.py
