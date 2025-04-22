@@ -12,6 +12,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v2
+      with:
+        persist-credentials: false  # ✅ 이 줄 추가! 중요함.
 
     - name: Set up Python
       uses: actions/setup-python@v2
@@ -27,5 +29,5 @@ jobs:
         FFWP_USER: ${{ secrets.FFWP_USER }}
         FFWP_PW: ${{ secrets.FFWP_PW }}
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        GH_PAT: ${{ secrets.GH_PAT }}  # <- GitHub PAT 필수
+        GH_PAT: ${{ secrets.GH_PAT }}  # GitHub Personal Access Token
       run: python alert.py
