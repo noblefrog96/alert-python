@@ -47,45 +47,4 @@ elements = driver.find_elements(By.CSS_SELECTOR, 'ul.pub_list li.c_list_tr')
 posts = []
 for el in elements:
     title = el.find_element(By.CSS_SELECTOR, 'span.list_tit').text.strip()
-    raw_href = el.find_element(By.TAG_NAME, 'a').get_attribute('href')
-
-    if raw_href.startswith("javascript:goView"):
-    m = re.search(r"goView\((\d+)\)", raw_href)
-    post_id = m.group(1) if m else raw_href
-    post_url = f"https://korhq.ffwp.org/official/?mode=view&pageType=officialList&sPage=1&sType=ffwp&sCategory=&listSearch=&document={post_id}#contents"  # 실제 URL 형식으로 수정
-    else:
-        post_url = raw_href
-    posts.append({'id': post_id, 'title': title, 'href': raw_href})
-driver.quit()
-
-# 4) last_seen 불러오기
-if os.path.exists(LAST_SEEN_FILE):
-    with open(LAST_SEEN_FILE, 'r') as f:
-        last_seen = f.read().strip()
-else:
-    last_seen = ''
-
-# 5) 새 게시글 필터링
-to_notify = []
-if last_seen == '':
-    to_notify = posts[:]
-else:
-    for p in posts:
-        if p['id'] == last_seen:
-            break
-        to_notify.append(p)
-
-# 6) 디스코드 전송
-for p in reversed(to_notify):
-    msg = f"📢 **[공지 알림]**\n제목: {p['title']}\n링크: {p['href']}"
-    requests.post(WEBHOOK_URL, json={'content': msg})
-
-# 7) last_seen.txt 업데이트 + git 커밋 & 푸시
-if posts:
-    newest_id = posts[0]['id']
-    with open(LAST_SEEN_FILE, 'w') as f:
-        f.write(newest_id)
-
-    subprocess.run(['git', 'add', LAST_SEEN_FILE])
-    subprocess.run(['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'])
-    subprocess.run(['git', 'push'])
+    raw_href = el.find_element(By.TAG_NAME, 'a')._
