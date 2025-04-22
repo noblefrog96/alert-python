@@ -12,6 +12,15 @@ import subprocess
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
 
+# Git 설정 (푸시를 위해 필요)
+subprocess.run(['git', 'config', '--global', 'user.name', 'noblefrog96'])
+subprocess.run(['git', 'config', '--global', 'user.email', 'noblefrog96@gmail.com'])
+subprocess.run([
+    'git', 'remote', 'set-url', 'origin',
+    f"https://{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
+])
+
+# Chrome headless 설정
 options = Options()
 options.add_argument('--headless')
 options.add_argument('--no-sandbox')
@@ -33,10 +42,8 @@ WebDriverWait(driver, 30).until(
     EC.presence_of_element_located((By.CSS_SELECTOR, 'ul.pub_list li.c_list_tr'))
 )
 
-# 3) 게시글 리스트 전부 긁어오기
+# 3) 게시글 리스트 긁기
 elements = driver.find_elements(By.CSS_SELECTOR, 'ul.pub_list li.c_list_tr')
-print(f"🔍 총 게시글 수: {len(elements)}")
-
 posts = []
 for el in elements:
     title = el.find_element(By.CSS_SELECTOR, 'span.list_tit').text.strip()
@@ -52,35 +59,28 @@ if os.path.exists(LAST_SEEN_FILE):
         last_seen = f.read().strip()
 else:
     last_seen = ''
-print(f"📄 last_seen: '{last_seen}'")
 
-# 5) 알림 대상 분류
+# 5) 새 게시글 필터링
 to_notify = []
 if last_seen == '':
-    to_notify = posts[:]   # 처음엔 전체
+    to_notify = posts[:]
 else:
     for p in posts:
         if p['id'] == last_seen:
             break
         to_notify.append(p)
 
-print(f"🔔 알림 대상 수: {len(to_notify)}")
-
-# 6) 디스코드 웹훅
+# 6) 디스코드 전송
 for p in reversed(to_notify):
     msg = f"📢 **[공지 알림]**\n제목: {p['title']}\n링크: {p['href']}"
-    print(f"📤 전송: {msg}")
-    res = requests.post(WEBHOOK_URL, json={'content': msg})
-    print("   →", "성공✅" if res.status_code == 204 else f"실패❌ {res.status_code}")
+    requests.post(WEBHOOK_URL, json={'content': msg})
 
-# 7) 최신 ID 기록 및 자동 커밋
+# 7) last_seen.txt 업데이트 + git 커밋 & 푸시
 if posts:
     newest_id = posts[0]['id']
     with open(LAST_SEEN_FILE, 'w') as f:
         f.write(newest_id)
-    print(f"✅ last_seen 업데이트: {newest_id}")
 
-    # Git 명령어로 커밋하고 푸시
-    subprocess.run(['git', 'add', LAST_SEEN_FILE])  # 파일 추가
-    subprocess.run(['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'])  # 커밋
-    subprocess.run(['git', 'push'])  # 푸시
+    subprocess.run(['git', 'add', LAST_SEEN_FILE])
+    subprocess.run(['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'])
+    subprocess.run(['git', 'push'])
