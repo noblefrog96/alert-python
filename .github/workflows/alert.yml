@@ -3,7 +3,7 @@ name: 게시판 알림
 on:
   schedule:
     - cron: '*/5 * * * *'  # 5분마다 실행
-  workflow_dispatch:  # 수동 실행을 위해 추가
+  workflow_dispatch:        # 수동 실행 가능
 
 jobs:
   check_posts:
@@ -27,13 +27,5 @@ jobs:
         FFWP_USER: ${{ secrets.FFWP_USER }}
         FFWP_PW: ${{ secrets.FFWP_PW }}
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        GH_TOKEN: ${{ secrets.GH_TOKEN }}
-      run: |
-        # Git 사용자 설정
-        git config --global user.name "noblefrog96"
-        git config --global user.email "noblefrog96@gmail.com"
-        
-        # 인증 정보 설정
-        echo "https://noblefrog96:${GH_PAT}@github.com/noblefrog96/alert-python.git" > ~/.git-credentials
-        
-        python alert.py
+        GH_PAT: ${{ secrets.GH_PAT }}  # <- GitHub PAT 필수
+      run: python alert.py
