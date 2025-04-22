@@ -7,6 +7,7 @@ import time
 import requests
 import os
 import re
+import subprocess
 
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
