@@ -17,7 +17,7 @@ subprocess.run(['git', 'config', '--global', 'user.name', 'noblefrog96'])
 subprocess.run(['git', 'config', '--global', 'user.email', 'noblefrog96@gmail.com'])
 subprocess.run([
     'git', 'remote', 'set-url', 'origin',
-    f"https://{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
+    f"https://x-access-token:{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
 ])
 
 # Chrome headless 설정
