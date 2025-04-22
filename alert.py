@@ -72,9 +72,14 @@ for p in reversed(to_notify):
     res = requests.post(WEBHOOK_URL, json={'content': msg})
     print("   →", "성공✅" if res.status_code == 204 else f"실패❌ {res.status_code}")
 
-# 7) 최신 ID 기록
+# 7) 최신 ID 기록 및 자동 커밋
 if posts:
     newest_id = posts[0]['id']
     with open(LAST_SEEN_FILE, 'w') as f:
         f.write(newest_id)
     print(f"✅ last_seen 업데이트: {newest_id}")
+
+    # Git 명령어로 커밋하고 푸시
+    subprocess.run(['git', 'add', LAST_SEEN_FILE])  # 파일 추가
+    subprocess.run(['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'])  # 커밋
+    subprocess.run(['git', 'push'])  # 푸시
