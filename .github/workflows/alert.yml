@@ -34,6 +34,6 @@ jobs:
         git config --global user.email "noblefrog96@gmail.com"
         
         # 인증 정보 설정
-        echo "https://noblefrog96:${GH_PAT}@github.com/noblefrog96/your-repo-name.git" > ~/.git-credentials
+        echo "https://noblefrog96:${GH_PAT}@github.com/noblefrog96/alert-python.git" > ~/.git-credentials
         
         python alert.py
