@@ -12,7 +12,7 @@ import subprocess
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
 
-# Git 설정 (푸시를 위해 필요)
+# Git 설정
 subprocess.run(['git', 'config', '--global', 'user.name', 'noblefrog96'])
 subprocess.run(['git', 'config', '--global', 'user.email', 'noblefrog96@gmail.com'])
 subprocess.run([
@@ -42,23 +42,44 @@ WebDriverWait(driver, 30).until(
     EC.presence_of_element_located((By.CSS_SELECTOR, 'ul.pub_list li.c_list_tr'))
 )
 
-# 3) 게시글 리스트 긁기
+# 3) 게시글 리스트 긁기 (ID 안정화)
 elements = driver.find_elements(By.CSS_SELECTOR, 'ul.pub_list li.c_list_tr')
 posts = []
+
 for el in elements:
     title = el.find_element(By.CSS_SELECTOR, 'span.list_tit').text.strip()
-    raw_href = el.find_element(By.TAG_NAME, 'a').get_attribute('href')  # .get_attribute('href')로 수정
+    raw_href = el.find_element(By.TAG_NAME, 'a').get_attribute('href')
+
+    post_id = None
+    post_url = None
 
     if raw_href.startswith("javascript:goView"):
-        # goView(10272)에서 10272를 추출
         m = re.search(r"goView\((\d+)\)", raw_href)
-        post_id = m.group(1) if m else raw_href
-        post_url = f"https://korhq.ffwp.org/official/?mode=view&pageType=officialList&sPage=1&sType=ffwp&sCategory=&listSearch=&document={post_id}#contents"  # 실제 URL 형식으로 수정
+        if m:
+            post_id = m.group(1)
+            post_url = (
+                "https://korhq.ffwp.org/official/"
+                "?mode=view&pageType=officialList&sPage=1&sType=ffwp"
+                f"&sCategory=&listSearch=&document={post_id}#contents"
+            )
     else:
-        post_url = raw_href
+        m = re.search(r'document=(\d+)', raw_href)
+        if m:
+            post_id = m.group(1)
+            post_url = raw_href
 
-    posts.append({'id': post_id, 'title': title, 'href': post_url})  # URL 수정된 post_url 사용
+    # post_id 없는 항목은 제외
+    if post_id:
+        posts.append({
+            'id': post_id,
+            'title': title,
+            'href': post_url
+        })
+
 driver.quit()
+
+# 게시글 ID 기준 최신순 정렬 (중요)
+posts.sort(key=lambda x: int(x['id']), reverse=True)
 
 # 4) last_seen 불러오기
 if os.path.exists(LAST_SEEN_FILE):
@@ -67,10 +88,12 @@ if os.path.exists(LAST_SEEN_FILE):
 else:
     last_seen = ''
 
-# 5) 새 게시글 필터링
+# 5) 새 게시글 필터링 (초기/비정상 상태 보호)
 to_notify = []
+
 if last_seen == '':
-    to_notify = posts[:]
+    # 최초 실행 또는 상태 꼬임 → 알림 보내지 않음
+    print("Initial run or invalid last_seen. Skipping notifications.")
 else:
     for p in posts:
         if p['id'] == last_seen:
@@ -86,12 +109,10 @@ for p in reversed(to_notify):
 if posts:
     newest_id = posts[0]['id']
 
-    # 기존 값과 다를 때만 파일 갱신
     if not os.path.exists(LAST_SEEN_FILE) or open(LAST_SEEN_FILE).read().strip() != newest_id:
         with open(LAST_SEEN_FILE, 'w') as f:
             f.write(newest_id)
 
-        # git 변경 여부 확인
         status = subprocess.run(
             ['git', 'status', '--porcelain'],
             capture_output=True,
