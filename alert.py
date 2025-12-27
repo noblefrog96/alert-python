@@ -82,12 +82,30 @@ for p in reversed(to_notify):
     msg = f"📢 **[공지 알림]**\n제목: {p['title']}\n링크: {p['href']}"
     requests.post(WEBHOOK_URL, json={'content': msg})
 
-# 7) last_seen.txt 업데이트 + git 커밋 & 푸시
+# 7) last_seen.txt 업데이트 + git 커밋 & 푸시 (변경 있을 때만)
 if posts:
     newest_id = posts[0]['id']
-    with open(LAST_SEEN_FILE, 'w') as f:
-        f.write(newest_id)
 
-    subprocess.run(['git', 'add', LAST_SEEN_FILE])
-    subprocess.run(['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'])
-    subprocess.run(['git', 'push'])
+    # 기존 값과 다를 때만 파일 갱신
+    if not os.path.exists(LAST_SEEN_FILE) or open(LAST_SEEN_FILE).read().strip() != newest_id:
+        with open(LAST_SEEN_FILE, 'w') as f:
+            f.write(newest_id)
+
+        # git 변경 여부 확인
+        status = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            capture_output=True,
+            text=True
+        )
+
+        if status.stdout.strip():
+            subprocess.run(['git', 'add', LAST_SEEN_FILE], check=True)
+            subprocess.run(
+                ['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'],
+                check=True
+            )
+            subprocess.run(['git', 'push'], check=True)
+        else:
+            print("No changes to commit")
+    else:
+        print("last_seen.txt unchanged")
