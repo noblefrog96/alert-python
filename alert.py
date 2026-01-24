@@ -149,11 +149,13 @@ if posts:
             ['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'],
             check=True
         )
-        subprocess.run(['git', 'push'], check=True)
+        try:
+            subprocess.run(['git', 'push'], check=True)
         except subprocess.CalledProcessError as e:
-        print("⚠ git push 실패:", e)
+            print("⚠ git push 실패:", e)
     else:
         print("last_seen.txt unchanged")
+
 
 
 
