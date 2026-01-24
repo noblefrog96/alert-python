@@ -101,6 +101,13 @@ if os.path.exists(LAST_SEEN_FILE):
 else:
     last_seen = ''
 
+# ⚠ last_seen 값 sanity check (숫자 아니면 초기화)
+if last_seen and not last_seen.isdigit():
+    print("⚠ last_seen 값이 숫자가 아님. 기준 재설정 후 종료")
+    with open(LAST_SEEN_FILE, 'w') as f:
+        f.write(posts[0]['id'])
+    exit(0)
+
 # ⚠ last_seen이 현재 페이지에 없으면 폭탄 방지
 current_ids = [p['id'] for p in posts]
 
@@ -122,11 +129,12 @@ else:
             break
         to_notify.append(p)
 
+print(f"🔔 감지된 새 게시글 수: {len(to_notify)}")
 
 # 6) 디스코드 전송
 for p in reversed(to_notify):
     msg = f"📢 **[공지 알림]**\n제목: {p['title']}\n링크: {p['href']}"
-    requests.post(WEBHOOK_URL, json={'content': msg})
+    requests.post(WEBHOOK_URL, json={'content': msg}, timeout=10)
 
 # 7) last_seen.txt 업데이트 + git 커밋 & 푸시 (변경 있을 때만)
 if posts:
@@ -142,7 +150,10 @@ if posts:
             check=True
         )
         subprocess.run(['git', 'push'], check=True)
+        except subprocess.CalledProcessError as e:
+        print("⚠ git push 실패:", e)
     else:
         print("last_seen.txt unchanged")
+
 
 
