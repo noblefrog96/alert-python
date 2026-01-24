@@ -143,18 +143,19 @@ if posts:
     if not os.path.exists(LAST_SEEN_FILE) or open(LAST_SEEN_FILE).read().strip() != newest_id:
         with open(LAST_SEEN_FILE, 'w') as f:
             f.write(newest_id)
-
-        subprocess.run(['git', 'add', LAST_SEEN_FILE], check=True)
-        subprocess.run(
-            ['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'],
-            check=True
-        )
+        try:
+            subprocess.run(['git', 'add', LAST_SEEN_FILE], check=True)
+            subprocess.run(['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'], check=True)
+            subprocess.run(['git', 'push'], check=True)
+        except subprocess.CalledProcessError as e:
+            print("⚠ git 작업 실패 (알림은 정상 전송됨):", e)
         try:
             subprocess.run(['git', 'push'], check=True)
         except subprocess.CalledProcessError as e:
             print("⚠ git push 실패:", e)
     else:
         print("last_seen.txt unchanged")
+
 
 
 
