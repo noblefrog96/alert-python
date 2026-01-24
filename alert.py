@@ -30,11 +30,24 @@ options.add_argument('--disable-gpu')
 driver = webdriver.Chrome(options=options)
 
 # 1) 로그인
-driver.get('https://www.ffwp.org/member/login.php')
+# 1) 로그인
+try:
+    driver.get('https://www.ffwp.org/member/login.php')
+except Exception as e:
+    print("❌ 로그인 페이지 로드 실패:", e)
+    driver.quit()
+    exit(0)
 driver.find_element(By.NAME, 'userid').send_keys(os.environ['FFWP_USER'])
 driver.find_element(By.NAME, 'password').send_keys(os.environ['FFWP_PW'])
 driver.find_element(By.ID, 'loginSubmit').click()
 time.sleep(2)
+
+# ✅ 로그인 성공 여부 확인
+if "login" in driver.current_url.lower():
+    print("❌ 로그인 실패 감지")
+    driver.quit()
+    exit(0)
+
 
 # 2) 게시판 접속
 driver.get('https://korhq.ffwp.org/official/?sType=ffwp')
@@ -88,6 +101,15 @@ if os.path.exists(LAST_SEEN_FILE):
 else:
     last_seen = ''
 
+# ⚠ last_seen이 현재 페이지에 없으면 폭탄 방지
+current_ids = [p['id'] for p in posts]
+
+if last_seen and last_seen not in current_ids:
+    print("⚠ last_seen이 현재 페이지에 없음. 기준 재설정 후 종료")
+    with open(LAST_SEEN_FILE, 'w') as f:
+        f.write(posts[0]['id'])
+    exit(0)
+
 # 5) 새 게시글 필터링 (초기/비정상 상태 보호)
 to_notify = []
 
@@ -99,6 +121,7 @@ else:
         if p['id'] == last_seen:
             break
         to_notify.append(p)
+
 
 # 6) 디스코드 전송
 for p in reversed(to_notify):
@@ -113,20 +136,13 @@ if posts:
         with open(LAST_SEEN_FILE, 'w') as f:
             f.write(newest_id)
 
-        status = subprocess.run(
-            ['git', 'status', '--porcelain'],
-            capture_output=True,
-            text=True
+        subprocess.run(['git', 'add', LAST_SEEN_FILE], check=True)
+        subprocess.run(
+            ['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'],
+            check=True
         )
-
-        if status.stdout.strip():
-            subprocess.run(['git', 'add', LAST_SEEN_FILE], check=True)
-            subprocess.run(
-                ['git', 'commit', '-m', f'Update last_seen.txt to {newest_id}'],
-                check=True
-            )
-            subprocess.run(['git', 'push'], check=True)
-        else:
-            print("No changes to commit")
+        subprocess.run(['git', 'push'], check=True)
     else:
         print("last_seen.txt unchanged")
+
+
