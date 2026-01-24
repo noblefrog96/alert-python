@@ -155,10 +155,3 @@ if posts:
             print("⚠ git 작업 실패 (알림은 정상 전송됨):", e)
     else:
         print("last_seen.txt unchanged")
-
-
-
-
-
-
-
