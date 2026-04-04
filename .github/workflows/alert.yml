@@ -2,7 +2,7 @@ name: 게시판 알림
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/10 * * * *'   # 10분마다
   workflow_dispatch:
 
 jobs:
@@ -22,13 +22,16 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install playwright requests
-        python -m playwright install chromium
+        pip install playwright beautifulsoup4 requests
+
+    - name: Install Playwright browser
+      run: |
+        playwright install chromium
 
     - name: Run alert script
       env:
-        FFWP_USER: ${{ secrets.FFWP_USER }}
+        FFWP_ID: ${{ secrets.FFWP_ID }}
         FFWP_PW: ${{ secrets.FFWP_PW }}
-        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         GH_PAT: ${{ secrets.GH_PAT }}
       run: python alert.py
