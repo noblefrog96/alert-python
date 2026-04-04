@@ -1,10 +1,8 @@
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import requests
 import os
 import re
 import subprocess
 import sys
-import time
 
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
@@ -12,16 +10,8 @@ LAST_SEEN_FILE = 'last_seen.txt'
 FFWP_USER = os.environ['FFWP_USER']
 FFWP_PW = os.environ['FFWP_PW']
 
-# =========================
-# 공통 함수
-# =========================
-def safe_exit(browser=None, code=0):
-    try:
-        if browser:
-            browser.close()
-    except:
-        pass
-    sys.exit(code)
+LOGIN_URL = "https://www.ffwp.org/member/login.php"
+BOARD_URL = "https://korhq.ffwp.org/official/?sType=ffwp"
 
 # =========================
 # Git 설정
@@ -33,139 +23,83 @@ subprocess.run([
     f"https://x-access-token:{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
 ])
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(
-        headless=True,
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-dev-shm-usage"
-        ]
-    )
+session = requests.Session()
 
-    context = browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-        viewport={"width": 1920, "height": 1080}
-    )
-
-    page = context.new_page()
-
-    # 브라우저 흔적 완화
-    page.add_init_script("""
-        Object.defineProperty(navigator, 'webdriver', {
-            get: () => undefined
-        });
-    """)
-
-    try:
-        # =========================
-        # 1) 로그인 페이지 접속
-        # =========================
-        page.goto("https://www.ffwp.org/member/login.php", wait_until="domcontentloaded", timeout=60000)
-        print("로그인 페이지 접근 성공")
-        print("현재 URL:", page.url)
-
-        page.wait_for_selector('input[name="userid"]', timeout=20000)
-        page.fill('input[name="userid"]', FFWP_USER)
-        page.fill('input[name="password"]', FFWP_PW)
-
-        # 로그인 버튼 클릭
-        page.click('#loginSubmit')
-        page.wait_for_timeout(5000)
-
-        print("로그인 후 URL:", page.url)
-        try:
-            print("로그인 후 제목:", page.title())
-        except:
-            pass
-
-        if "login" in page.url.lower():
-            print("❌ 로그인 실패 감지")
-            safe_exit(browser, 0)
-
-        # =========================
-        # 2) 메인 페이지 안정화
-        # =========================
-        page.goto("https://www.ffwp.org/main.php", wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(5000)
-
-        print("메인 페이지 URL:", page.url)
-        try:
-            print("메인 페이지 제목:", page.title())
-        except:
-            pass
-
-        # 스크롤로 JS 안정화
-        page.mouse.wheel(0, 3000)
-        page.wait_for_timeout(1500)
-        page.mouse.wheel(0, -3000)
-        page.wait_for_timeout(1500)
-
-        # =========================
-        # 3) 게시판 이동 시도
-        # =========================
-        page.goto("https://korhq.ffwp.org/official/?sType=ffwp", wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(8000)
-
-        print("게시판 접근 후 URL:", page.url)
-        try:
-            print("페이지 제목:", page.title())
-        except:
-            pass
-
-        # =========================
-        # 4) 게시판 목록 로딩 대기
-        # =========================
-        try:
-            page.wait_for_selector("ul.pub_list li.c_list_tr, table tbody tr, a[href*='document='], a[href*='goView']", timeout=60000)
-            print("✅ 게시판 목록 로딩 성공")
-        except PlaywrightTimeoutError:
-            print("❌ 게시판 로딩 실패")
-            print("현재 URL:", page.url)
-            try:
-                print("페이지 제목:", page.title())
-            except:
-                pass
-
-            # 디버깅용 HTML 일부 출력
-            html = page.content()
-            print("페이지 HTML 일부:", html[:1500])
-
-            safe_exit(browser, 0)
-
-        # =========================
-        # 5) 게시글 파싱
-        # =========================
-        html = page.content()
-        browser.close()
-
-    except Exception as e:
-        print("❌ 브라우저 실행 중 예외:", e)
-        safe_exit(browser, 0)
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    "Referer": "https://www.ffwp.org/member/login.php",
+    "Origin": "https://www.ffwp.org",
+}
 
 # =========================
-# 6) HTML에서 게시글 번호 추출
+# 1) 로그인
 # =========================
-# document=숫자 우선 추출
-doc_ids = re.findall(r'document=(\d+)', html)
+login_payload = {
+    "userid": FFWP_USER,
+    "password": FFWP_PW
+}
 
-# javascript:goView(숫자)도 같이 추출
-goview_ids = re.findall(r'goView\((\d+)\)', html)
-
-all_ids = list(set(doc_ids + goview_ids))
-all_ids = [x for x in all_ids if x.isdigit()]
-
-print(f"파싱된 게시글 ID 수: {len(all_ids)}")
-
-if not all_ids:
-    print("❌ 게시글 ID 파싱 실패")
+try:
+    login_res = session.post(LOGIN_URL, data=login_payload, headers=headers, timeout=20)
+    print("로그인 응답 URL:", login_res.url)
+    print("로그인 상태 코드:", login_res.status_code)
+except Exception as e:
+    print("❌ 로그인 요청 실패:", e)
     sys.exit(0)
 
-latest_id = max(all_ids, key=int)
-print(f"✅ 감지된 최신 게시글 번호: {latest_id}")
+# =========================
+# 2) 게시판 페이지 접근
+# =========================
+board_headers = {
+    "User-Agent": headers["User-Agent"],
+    "Referer": "https://www.ffwp.org/main.php",
+    "Origin": "https://korhq.ffwp.org",
+}
+
+try:
+    board_res = session.get(BOARD_URL, headers=board_headers, timeout=20)
+    print("게시판 접근 URL:", board_res.url)
+    print("게시판 접근 상태:", board_res.status_code)
+    print("게시판 HTML 일부:\n", board_res.text[:1200])
+except Exception as e:
+    print("❌ 게시판 접근 실패:", e)
+    sys.exit(0)
+
+html = board_res.text
 
 # =========================
-# 7) last_seen 불러오기
+# 3) 최신 게시글 번호 추출
+# =========================
+
+latest_id = None
+
+# (1) 가장 유력: JS/HTML 내 sTotalRows
+m = re.search(r'sTotalRows["\']?\s*[:=]\s*["\']?(\d+)', html)
+if m:
+    latest_id = m.group(1)
+    print("✅ sTotalRows 기반 최신 번호 발견:", latest_id)
+
+# (2) 백업: 게시판 표 첫 번호 추출
+if not latest_id:
+    m = re.search(r'<td[^>]*>\s*(\d{3,6})\s*</td>', html)
+    if m:
+        latest_id = m.group(1)
+        print("✅ 표 첫 번호 기반 최신 번호 발견:", latest_id)
+
+# (3) 백업: goView/document 기반 번호 추출
+if not latest_id:
+    ids = re.findall(r'(?:goView\(|document=)(\d+)', html)
+    ids = [x for x in ids if x.isdigit()]
+    if ids:
+        latest_id = max(ids, key=int)
+        print("✅ 링크 기반 최신 번호 발견:", latest_id)
+
+if not latest_id:
+    print("❌ 최신 게시글 번호를 찾지 못함")
+    sys.exit(0)
+
+# =========================
+# 4) last_seen 불러오기
 # =========================
 if os.path.exists(LAST_SEEN_FILE):
     with open(LAST_SEEN_FILE, 'r', encoding='utf-8') as f:
@@ -174,7 +108,9 @@ else:
     last_seen = ''
 
 print("현재 last_seen:", last_seen)
+print("현재 latest_id:", latest_id)
 
+# sanity check
 if last_seen and not last_seen.isdigit():
     print("⚠ last_seen 값이 숫자가 아님. 기준 재설정 후 종료")
     with open(LAST_SEEN_FILE, 'w', encoding='utf-8') as f:
@@ -182,16 +118,16 @@ if last_seen and not last_seen.isdigit():
     sys.exit(0)
 
 # =========================
-# 8) 새 글 감지
+# 5) 새 글 감지
 # =========================
 if last_seen == '':
-    print("최초 실행 또는 last_seen 비어있음 → 알림 없이 기준값만 저장")
+    print("최초 실행 → 알림 없이 기준값만 저장")
 elif int(latest_id) > int(last_seen):
     msg = (
         f"📢 **[공지 알림]**\n"
         f"새 공지가 올라왔습니다!\n"
         f"최신 번호: {latest_id}\n"
-        f"게시판: https://korhq.ffwp.org/official/?sType=ffwp"
+        f"게시판: {BOARD_URL}"
     )
     try:
         requests.post(WEBHOOK_URL, json={'content': msg}, timeout=10)
@@ -202,7 +138,7 @@ else:
     print("새 글 없음")
 
 # =========================
-# 9) last_seen 저장 + git push
+# 6) last_seen 저장 + git push
 # =========================
 if last_seen != latest_id:
     with open(LAST_SEEN_FILE, 'w', encoding='utf-8') as f:
