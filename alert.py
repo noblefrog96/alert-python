@@ -1,10 +1,8 @@
-from playwright.sync_api import sync_playwright
 import requests
 import os
 import re
 import subprocess
 import sys
-import time
 
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
@@ -15,6 +13,7 @@ FFWP_PW = os.environ['FFWP_PW']
 LOGIN_URL = "https://www.ffwp.org/member/login.php"
 MAIN_URL = "https://www.ffwp.org/main.php"
 BOARD_URL = "https://korhq.ffwp.org/official/?sType=ffwp"
+AJAX_URL = "https://korhq.ffwp.org/include/function_ajax.php"
 
 # =========================
 # Git 설정
@@ -25,6 +24,13 @@ subprocess.run([
     'git', 'remote', 'set-url', 'origin',
     f"https://x-access-token:{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
 ])
+
+session = requests.Session()
+
+COMMON_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
+    "Accept-Language": "ko,en;q=0.9,en-US;q=0.8",
+}
 
 def load_last_seen():
     if os.path.exists(LAST_SEEN_FILE):
@@ -52,52 +58,111 @@ def send_discord(msg):
     except Exception as e:
         print("⚠ 디스코드 전송 실패:", e)
 
-def extract_posts(html):
+def login():
+    try:
+        # 로그인 페이지 한번 열기
+        r1 = session.get(LOGIN_URL, headers=COMMON_HEADERS, timeout=20)
+        print("로그인 페이지 접근:", r1.status_code, r1.url)
+
+        payload = {
+            "userid": FFWP_USER,
+            "password": FFWP_PW
+        }
+
+        headers = COMMON_HEADERS.copy()
+        headers.update({
+            "Referer": LOGIN_URL,
+            "Origin": "https://www.ffwp.org",
+            "Content-Type": "application/x-www-form-urlencoded"
+        })
+
+        r2 = session.post(LOGIN_URL, data=payload, headers=headers, timeout=20, allow_redirects=True)
+        print("로그인 응답 URL:", r2.url)
+        print("로그인 상태 코드:", r2.status_code)
+
+        # 메인 페이지 한번 접근
+        r3 = session.get(MAIN_URL, headers=COMMON_HEADERS, timeout=20)
+        print("메인 페이지 접근:", r3.status_code, r3.url)
+
+        print("현재 세션 쿠키:")
+        for c in session.cookies:
+            print(f"  {c.name}={c.value} (domain={c.domain})")
+
+    except Exception as e:
+        print("❌ 로그인 실패:", e)
+        sys.exit(0)
+
+def try_board_page():
+    """
+    게시판 document 직접 접근 시도
+    """
+    try:
+        headers = COMMON_HEADERS.copy()
+        headers.update({
+            "Referer": MAIN_URL,
+            "Origin": "https://korhq.ffwp.org"
+        })
+
+        r = session.get(BOARD_URL, headers=headers, timeout=20, allow_redirects=True)
+        print("게시판 접근 URL:", r.url)
+        print("게시판 접근 상태:", r.status_code)
+        print("게시판 HTML 일부:\n", r.text[:2000])
+
+        return r.text, r.url
+    except Exception as e:
+        print("❌ 게시판 접근 실패:", e)
+        return "", ""
+
+def extract_latest_from_html(html):
+    """
+    HTML에서 최신 게시글 번호 / 제목 / 링크 추출
+    """
     posts = []
 
-    # 게시글 번호 + 제목 + 링크 추출
-    # 케이스1: document=1234 링크
-    pattern1 = re.findall(
-        r'href="([^"]*document=(\d+)[^"]*)"[^>]*>\s*([^<]+?)\s*</a>',
-        html,
-        re.IGNORECASE
-    )
-
-    for href, post_id, title in pattern1:
-        title = re.sub(r'\s+', ' ', title).strip()
-        if title and post_id.isdigit():
-            if href.startswith('/'):
-                href = "https://korhq.ffwp.org" + href
-            elif href.startswith('?'):
-                href = "https://korhq.ffwp.org/official/" + href
-            elif not href.startswith('http'):
-                href = "https://korhq.ffwp.org/official/" + href
-
+    # 1) goView(숫자)
+    matches = re.findall(r'goView\((\d+)\)', html)
+    for post_id in matches:
+        if post_id.isdigit():
+            href = (
+                "https://korhq.ffwp.org/official/"
+                "?mode=view&pageType=officialList&sPage=1&sType=ffwp"
+                f"&sCategory=&listSearch=&document={post_id}#contents"
+            )
             posts.append({
                 "id": post_id,
-                "title": title,
+                "title": f"게시글 {post_id}",
                 "href": href
             })
 
-    # 케이스2: javascript:goView(1234)
-    pattern2 = re.findall(
-        r'href="javascript:goView\((\d+)\);"[^>]*>\s*([^<]+?)\s*</a>',
-        html,
-        re.IGNORECASE
-    )
+    # 2) document=숫자
+    matches = re.findall(r'document=(\d+)', html)
+    for post_id in matches:
+        if post_id.isdigit():
+            href = (
+                "https://korhq.ffwp.org/official/"
+                "?mode=view&pageType=officialList&sPage=1&sType=ffwp"
+                f"&sCategory=&listSearch=&document={post_id}#contents"
+            )
+            posts.append({
+                "id": post_id,
+                "title": f"게시글 {post_id}",
+                "href": href
+            })
 
-    for post_id, title in pattern2:
-        title = re.sub(r'\s+', ' ', title).strip()
-        href = (
-            "https://korhq.ffwp.org/official/"
-            "?mode=view&pageType=officialList&sPage=1&sType=ffwp"
-            f"&sCategory=&listSearch=&document={post_id}#contents"
-        )
-        posts.append({
-            "id": post_id,
-            "title": title,
-            "href": href
-        })
+    # 3) 표 첫 번호 추정
+    matches = re.findall(r'<td[^>]*>\s*(\d{3,6})\s*</td>', html)
+    for post_id in matches:
+        if post_id.isdigit():
+            href = (
+                "https://korhq.ffwp.org/official/"
+                "?mode=view&pageType=officialList&sPage=1&sType=ffwp"
+                f"&sCategory=&listSearch=&document={post_id}#contents"
+            )
+            posts.append({
+                "id": post_id,
+                "title": f"게시글 {post_id}",
+                "href": href
+            })
 
     # 중복 제거
     dedup = {}
@@ -106,145 +171,113 @@ def extract_posts(html):
 
     posts = list(dedup.values())
     posts.sort(key=lambda x: int(x["id"]), reverse=True)
-    return posts
 
-# =========================
-# 브라우저 실행
-# =========================
-with sync_playwright() as p:
-browser = p.chromium.launch(
-    headless=True,
-    args=[
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-web-security",
-        "--disable-features=IsolateOrigins,site-per-process"
-    ]
-)
+    if posts:
+        print("HTML 기반 후보 게시글들:", posts[:10])
+        return posts[0]
 
-context = browser.new_context(
-    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-    viewport={"width": 1366, "height": 768},
-    locale="ko-KR",
-    timezone_id="Asia/Seoul"
-)
+    return None
 
-page = context.new_page()
+def try_ajax_with_guess(last_seen):
+    """
+    function_ajax.php 우회 시도
+    핵심: sTotalRows를 대충 현재 추정값으로 넣고 응답 확인
+    """
+    guess_total = 8600  # 기본 추정치
 
-# 자동화 흔적 숨기기
-page.add_init_script("""
-Object.defineProperty(navigator, 'webdriver', {
-    get: () => undefined
-});
-Object.defineProperty(navigator, 'languages', {
-    get: () => ['ko-KR', 'ko', 'en-US', 'en']
-});
-Object.defineProperty(navigator, 'platform', {
-    get: () => 'Win32'
-});
-""")
+    if last_seen.isdigit():
+        guess_total = max(int(last_seen), 8600)
+
+    payload = {
+        "pageType": "pagingList",
+        "sPage": "1",
+        "sPageBlock": "10",
+        "sTotalRows": str(guess_total),
+        "sMaxRows": "30"
+    }
+
+    headers = COMMON_HEADERS.copy()
+    headers.update({
+        "Accept": "text/plain, */*; q=0.01",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://korhq.ffwp.org",
+        "Referer": BOARD_URL
+    })
 
     try:
-        # 1) 로그인 페이지
-        page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
-        print("로그인 페이지 접근 성공")
-        print("현재 URL:", page.url)
+        r = session.post(AJAX_URL, data=payload, headers=headers, timeout=20)
+        print("AJAX 상태 코드:", r.status_code)
+        print("AJAX 응답 일부:\n", r.text[:1500])
 
-        page.fill('input[name="userid"]', FFWP_USER)
-        page.fill('input[name="password"]', FFWP_PW)
-        page.click('#loginSubmit')
+        # 응답 내 마지막 페이지 계산 힌트
+        page_moves = re.findall(r'pageMove\((\d+)\)', r.text)
+        if page_moves:
+            print("AJAX 응답 pageMove 후보:", page_moves[:20])
 
-        page.wait_for_load_state("networkidle", timeout=60000)
-        print("로그인 후 URL:", page.url)
-        print("로그인 후 제목:", page.title())
-
-        # 2) 메인 한번 거치기
-        page.goto(MAIN_URL, wait_until="networkidle", timeout=60000)
-        print("메인 페이지 URL:", page.url)
-        print("메인 페이지 제목:", page.title())
-
-# 3) 게시판 진입 (직접 goto 대신 브라우저 이동 방식 흉내)
-page.evaluate(f"window.location.href = '{BOARD_URL}'")
-page.wait_for_timeout(7000)
-
-print("게시판 접근 후 URL:", page.url)
-print("페이지 제목:", page.title())
-
-# 한 번 더 강제로 이동 시도
-if "official" not in page.url:
-    print("⚠ 첫 진입 실패 → 새 탭 방식 재시도")
-    new_page = context.new_page()
-    new_page.goto(BOARD_URL, wait_until="domcontentloaded", timeout=60000)
-    new_page.wait_for_timeout(7000)
-    page = new_page
-
-print("재확인 URL:", page.url)
-print("재확인 제목:", page.title())
-
-        # 혹시 JS 후처리 기다림
-        page.wait_for_load_state("networkidle", timeout=30000)
-
-        html = page.content()
-        print("페이지 HTML 일부:", html[:3000])
-
-        # 혹시 표가 뜨는지 확인
-        if "공문" not in html and "번호" not in html and "제목" not in html:
-            print("❌ 게시판 본문 키워드가 HTML에 없음")
-            browser.close()
-            sys.exit(0)
-
-        posts = extract_posts(html)
-        print(f"추출된 게시글 수: {len(posts)}")
-
-        if not posts:
-            print("❌ 게시글 추출 실패")
-            browser.close()
-            sys.exit(0)
-
-        newest = posts[0]
-        newest_id = newest["id"]
-
-        print("최신 게시글:", newest)
-
-        last_seen = load_last_seen()
-        print("현재 last_seen:", last_seen)
-
-        if last_seen and not last_seen.isdigit():
-            print("⚠ last_seen 값 이상 → 재설정")
-            save_last_seen(newest_id)
-            browser.close()
-            sys.exit(0)
-
-        if last_seen == '':
-            print("최초 실행 → 알림 없이 기준 저장")
-        else:
-            new_posts = []
-            for p in posts:
-                if p["id"] == last_seen:
-                    break
-                new_posts.append(p)
-
-            print(f"새 게시글 수: {len(new_posts)}")
-
-            for p in reversed(new_posts):
-                msg = f"📢 **[공지 알림]**\n제목: {p['title']}\n링크: {p['href']}"
-                send_discord(msg)
-
-        if last_seen != newest_id:
-            save_last_seen(newest_id)
-            git_push_if_changed(newest_id)
-        else:
-            print("last_seen.txt unchanged")
-
+        # 여기선 직접 최신 게시글 번호는 못 얻더라도
+        # 현재 totalRows 추정치가 맞는지 보조 힌트로 사용
+        return True
     except Exception as e:
-        print("❌ 실행 중 오류:", e)
-        print("현재 URL:", page.url)
-        try:
-            print("현재 제목:", page.title())
-            print("현재 HTML 일부:", page.content()[:3000])
-        except:
-            pass
-    finally:
-        browser.close()
+        print("❌ AJAX 요청 실패:", e)
+        return False
+
+# =========================
+# 실행
+# =========================
+login()
+
+last_seen = load_last_seen()
+print("현재 last_seen:", last_seen)
+
+html, final_url = try_board_page()
+
+latest_post = None
+
+# 1차: HTML 직접 파싱
+if html:
+    latest_post = extract_latest_from_html(html)
+
+# 2차: HTML 실패 시 AJAX 힌트 확인
+if not latest_post:
+    print("⚠ HTML에서 최신 게시글 추출 실패 → AJAX 보조 시도")
+    try_ajax_with_guess(last_seen)
+
+# 3차: 최후 fallback
+if not latest_post:
+    # 만약 게시판 문서 접근이 막혀도, 최신 번호를 last_seen+1 정도로 추정하는 건 위험해서 금지
+    print("❌ 최신 게시글 번호를 찾지 못함")
+    sys.exit(0)
+
+latest_id = latest_post["id"]
+print("최종 최신 게시글:", latest_post)
+
+# sanity check
+if last_seen and not last_seen.isdigit():
+    print("⚠ last_seen 값 이상 → 재설정")
+    save_last_seen(latest_id)
+    sys.exit(0)
+
+# =========================
+# 알림 처리
+# =========================
+if last_seen == '':
+    print("최초 실행 → 알림 없이 기준 저장")
+elif int(latest_id) > int(last_seen):
+    msg = (
+        f"📢 **[공지 알림]**\n"
+        f"제목: {latest_post['title']}\n"
+        f"링크: {latest_post['href']}"
+    )
+    send_discord(msg)
+else:
+    print("새 글 없음")
+
+# =========================
+# 저장 + 푸시
+# =========================
+if last_seen != latest_id:
+    save_last_seen(latest_id)
+    git_push_if_changed(latest_id)
+else:
+    print("last_seen.txt unchanged")
