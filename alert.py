@@ -8,7 +8,7 @@ import json
 
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
-COOKIES_JSON = os.environ['FFWP_COOKIES']
+STORAGE_STATE_JSON = os.environ['FFWP_STORAGE_STATE']
 
 
 def safe_exit(code=0):
@@ -23,11 +23,12 @@ subprocess.run([
     f"https://x-access-token:{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
 ])
 
-# 쿠키 로드
+# storage_state 로드
 try:
-    cookies = json.loads(COOKIES_JSON)
+    storage_state = json.loads(STORAGE_STATE_JSON)
+    print("✅ storage_state 로드 완료")
 except Exception as e:
-    print("❌ 쿠키 JSON 파싱 실패:", e)
+    print("❌ storage_state JSON 파싱 실패:", e)
     safe_exit(0)
 
 with sync_playwright() as p:
@@ -41,19 +42,11 @@ with sync_playwright() as p:
     )
 
     context = browser.new_context(
+        storage_state=storage_state,
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         locale="ko-KR",
         viewport={"width": 1920, "height": 1080}
     )
-
-    # 쿠키 주입
-    try:
-        context.add_cookies(cookies)
-        print("✅ 쿠키 주입 완료")
-    except Exception as e:
-        print("❌ 쿠키 주입 실패:", e)
-        browser.close()
-        safe_exit(0)
 
     page = context.new_page()
 
