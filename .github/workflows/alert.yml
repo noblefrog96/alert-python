@@ -2,8 +2,8 @@ name: 게시판 알림
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # 10분마다 실행
-  workflow_dispatch:        # 수동 실행 가능
+    - cron: '*/10 * * * *'  # 10분마다 실행 추천
+  workflow_dispatch:
 
 jobs:
   check_posts:
@@ -11,12 +11,12 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
       with:
-        persist-credentials: false  # ✅ 이 줄 추가! 중요함.
+        persist-credentials: false
 
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v5
       with:
         python-version: '3.8'
 
@@ -29,5 +29,16 @@ jobs:
         FFWP_USER: ${{ secrets.FFWP_USER }}
         FFWP_PW: ${{ secrets.FFWP_PW }}
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        GH_PAT: ${{ secrets.GH_PAT }}  # GitHub Personal Access Token
+        GH_PAT: ${{ secrets.GH_PAT }}
       run: python alert.py
+
+    # ✅ 실패했을 때 디버그 파일 업로드
+    - name: Upload debug artifacts
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-files
+        path: |
+          debug_*.html
+          debug_*.png
+        if-no-files-found: ignore
