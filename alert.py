@@ -145,6 +145,10 @@ if not posts:
 
 # 게시글 ID 기준 최신순 정렬 (중요)
 posts.sort(key=lambda x: int(x['id']), reverse=True)
+print(f"📄 읽어온 게시글 수: {len(posts)}")
+if posts:
+    print(f"🆕 현재 최신 게시글 ID: {posts[0]['id']}")
+    print(f"📝 현재 최신 게시글 제목: {posts[0]['title']}")
 
 # 4) last_seen 불러오기
 if os.path.exists(LAST_SEEN_FILE):
@@ -152,6 +156,7 @@ if os.path.exists(LAST_SEEN_FILE):
         last_seen = f.read().strip()
 else:
     last_seen = ''
+print(f"💾 last_seen.txt 값: {last_seen}")
 
 # ⚠ last_seen 값 sanity check (숫자 아니면 초기화)
 if last_seen and not last_seen.isdigit():
@@ -182,8 +187,12 @@ else:
         to_notify.append(p)
 
 print(f"🔔 감지된 새 게시글 수: {len(to_notify)}")
+for p in to_notify[:5]:
+    print(f"➡ 감지된 글: {p['id']} | {p['title']}")
 
 # 6) 디스코드 전송
+if not to_notify:
+    print("ℹ️ 새 게시글 없음 → 디스코드 전송 안 함")
 for p in reversed(to_notify):
     msg = f"📢 **[공지 알림]**\n제목: {p['title']}\n링크: {p['href']}"
     try:
