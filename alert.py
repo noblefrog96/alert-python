@@ -1,13 +1,31 @@
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import requests
 import os
-import subprocess
 import re
+import subprocess
+import sys
+import time
 
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
-FFWP_COOKIE = os.environ['FFWP_COOKIE']
 
+FFWP_USER = os.environ['FFWP_USER']
+FFWP_PW = os.environ['FFWP_PW']
+
+# =========================
+# 공통 함수
+# =========================
+def safe_exit(browser=None, code=0):
+    try:
+        if browser:
+            browser.close()
+    except:
+        pass
+    sys.exit(code)
+
+# =========================
 # Git 설정
+# =========================
 subprocess.run(['git', 'config', '--global', 'user.name', 'noblefrog96'])
 subprocess.run(['git', 'config', '--global', 'user.email', 'noblefrog96@gmail.com'])
 subprocess.run([
@@ -15,101 +33,157 @@ subprocess.run([
     f"https://x-access-token:{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
 ])
 
-# -------------------------------------------------
-# 1) 세션 생성 + 브라우저 쿠키 주입
-# -------------------------------------------------
-session = requests.Session()
+with sync_playwright() as p:
+    browser = p.chromium.launch(
+        headless=True,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-dev-shm-usage"
+        ]
+    )
 
-common_headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-    "Cookie": FFWP_COOKIE
-}
-session.headers.update(common_headers)
+    context = browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        viewport={"width": 1920, "height": 1080}
+    )
 
-print("✅ 쿠키 주입 완료")
+    page = context.new_page()
 
-# -------------------------------------------------
-# 2) 게시판 페이지 접근
-# -------------------------------------------------
-board_page_url = "https://korhq.ffwp.org/official/?sType=ffwp"
+    # 브라우저 흔적 완화
+    page.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+    """)
 
-try:
-    board_page_res = session.get(board_page_url, timeout=20)
-    print("게시판 접근 URL:", board_page_res.url)
-    print("게시판 접근 상태:", board_page_res.status_code)
-    print("게시판 HTML 일부:", board_page_res.text[:500])
-except Exception as e:
-    print("❌ 게시판 접근 실패:", e)
-    exit(0)
+    try:
+        # =========================
+        # 1) 로그인 페이지 접속
+        # =========================
+        page.goto("https://www.ffwp.org/member/login.php", wait_until="domcontentloaded", timeout=60000)
+        print("로그인 페이지 접근 성공")
+        print("현재 URL:", page.url)
 
-# 접근 차단 여부 체크
-if "login.php" in board_page_res.url.lower() or "main.php" in board_page_res.url.lower():
-    print("❌ 게시판 접근이 차단됨 (로그인 세션 무효 또는 권한 문제)")
-    exit(0)
+        page.wait_for_selector('input[name="userid"]', timeout=20000)
+        page.fill('input[name="userid"]', FFWP_USER)
+        page.fill('input[name="password"]', FFWP_PW)
 
-# -------------------------------------------------
-# 3) function_ajax.php 호출
-# -------------------------------------------------
-ajax_url = "https://korhq.ffwp.org/include/function_ajax.php"
+        # 로그인 버튼 클릭
+        page.click('#loginSubmit')
+        page.wait_for_timeout(5000)
 
-ajax_headers = {
-    "Referer": "https://korhq.ffwp.org/official/?sType=ffwp",
-    "Origin": "https://korhq.ffwp.org",
-    "X-Requested-With": "XMLHttpRequest",
-    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-}
+        print("로그인 후 URL:", page.url)
+        try:
+            print("로그인 후 제목:", page.title())
+        except:
+            pass
 
-payload = {
-    "pageType": "pagingList",
-    "sPage": "1",
-    "sPageBlock": "10",
-    "sTotalRows": "0",
-    "sMaxRows": "30"
-}
+        if "login" in page.url.lower():
+            print("❌ 로그인 실패 감지")
+            safe_exit(browser, 0)
 
-try:
-    ajax_res = session.post(ajax_url, data=payload, headers=ajax_headers, timeout=20)
-    print("AJAX 상태 코드:", ajax_res.status_code)
-    print("AJAX 응답 일부:", ajax_res.text[:1000])
-except Exception as e:
-    print("❌ AJAX 호출 실패:", e)
-    exit(0)
+        # =========================
+        # 2) 메인 페이지 안정화
+        # =========================
+        page.goto("https://www.ffwp.org/main.php", wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(5000)
 
-# -------------------------------------------------
-# 4) 최신 게시글 번호 추출
-# -------------------------------------------------
-# 응답 안에서 4~6자리 숫자 후보 추출
-matches = re.findall(r'\b\d{4,6}\b', ajax_res.text)
+        print("메인 페이지 URL:", page.url)
+        try:
+            print("메인 페이지 제목:", page.title())
+        except:
+            pass
 
-# 너무 작은 숫자(예: 10, 30 같은 설정값) 제외용
-matches = [m for m in matches if int(m) >= 1000]
+        # 스크롤로 JS 안정화
+        page.mouse.wheel(0, 3000)
+        page.wait_for_timeout(1500)
+        page.mouse.wheel(0, -3000)
+        page.wait_for_timeout(1500)
 
-if not matches:
-    print("❌ 최신 게시글 번호를 찾지 못함")
-    exit(0)
+        # =========================
+        # 3) 게시판 이동 시도
+        # =========================
+        page.goto("https://korhq.ffwp.org/official/?sType=ffwp", wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(8000)
 
-latest_id = max(matches, key=int)
+        print("게시판 접근 후 URL:", page.url)
+        try:
+            print("페이지 제목:", page.title())
+        except:
+            pass
+
+        # =========================
+        # 4) 게시판 목록 로딩 대기
+        # =========================
+        try:
+            page.wait_for_selector("ul.pub_list li.c_list_tr, table tbody tr, a[href*='document='], a[href*='goView']", timeout=60000)
+            print("✅ 게시판 목록 로딩 성공")
+        except PlaywrightTimeoutError:
+            print("❌ 게시판 로딩 실패")
+            print("현재 URL:", page.url)
+            try:
+                print("페이지 제목:", page.title())
+            except:
+                pass
+
+            # 디버깅용 HTML 일부 출력
+            html = page.content()
+            print("페이지 HTML 일부:", html[:1500])
+
+            safe_exit(browser, 0)
+
+        # =========================
+        # 5) 게시글 파싱
+        # =========================
+        html = page.content()
+        browser.close()
+
+    except Exception as e:
+        print("❌ 브라우저 실행 중 예외:", e)
+        safe_exit(browser, 0)
+
+# =========================
+# 6) HTML에서 게시글 번호 추출
+# =========================
+# document=숫자 우선 추출
+doc_ids = re.findall(r'document=(\d+)', html)
+
+# javascript:goView(숫자)도 같이 추출
+goview_ids = re.findall(r'goView\((\d+)\)', html)
+
+all_ids = list(set(doc_ids + goview_ids))
+all_ids = [x for x in all_ids if x.isdigit()]
+
+print(f"파싱된 게시글 ID 수: {len(all_ids)}")
+
+if not all_ids:
+    print("❌ 게시글 ID 파싱 실패")
+    sys.exit(0)
+
+latest_id = max(all_ids, key=int)
 print(f"✅ 감지된 최신 게시글 번호: {latest_id}")
 
-# -------------------------------------------------
-# 5) last_seen 불러오기
-# -------------------------------------------------
+# =========================
+# 7) last_seen 불러오기
+# =========================
 if os.path.exists(LAST_SEEN_FILE):
     with open(LAST_SEEN_FILE, 'r', encoding='utf-8') as f:
         last_seen = f.read().strip()
 else:
     last_seen = ''
 
-# sanity check
+print("현재 last_seen:", last_seen)
+
 if last_seen and not last_seen.isdigit():
     print("⚠ last_seen 값이 숫자가 아님. 기준 재설정 후 종료")
     with open(LAST_SEEN_FILE, 'w', encoding='utf-8') as f:
         f.write(latest_id)
-    exit(0)
+    sys.exit(0)
 
-# -------------------------------------------------
-# 6) 새 글 감지
-# -------------------------------------------------
+# =========================
+# 8) 새 글 감지
+# =========================
 if last_seen == '':
     print("최초 실행 또는 last_seen 비어있음 → 알림 없이 기준값만 저장")
 elif int(latest_id) > int(last_seen):
@@ -127,9 +201,9 @@ elif int(latest_id) > int(last_seen):
 else:
     print("새 글 없음")
 
-# -------------------------------------------------
-# 7) last_seen.txt 업데이트 + git push
-# -------------------------------------------------
+# =========================
+# 9) last_seen 저장 + git push
+# =========================
 if last_seen != latest_id:
     with open(LAST_SEEN_FILE, 'w', encoding='utf-8') as f:
         f.write(latest_id)
@@ -143,6 +217,6 @@ if last_seen != latest_id:
         subprocess.run(['git', 'push'], check=True)
         print("✅ last_seen.txt 업데이트 및 푸시 완료")
     except subprocess.CalledProcessError as e:
-        print("⚠ git 작업 실패 (알림은 정상 동작 가능):", e)
+        print("⚠ git 작업 실패 (알림은 정상 전송 가능):", e)
 else:
     print("last_seen.txt unchanged")
