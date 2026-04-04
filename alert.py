@@ -8,9 +8,7 @@ from playwright.sync_api import sync_playwright
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
 
-# =========================
 # Git 설정
-# =========================
 subprocess.run(['git', 'config', '--global', 'user.name', 'noblefrog96'])
 subprocess.run(['git', 'config', '--global', 'user.email', 'noblefrog96@gmail.com'])
 subprocess.run([
@@ -19,6 +17,8 @@ subprocess.run([
 ])
 
 LOGIN_URL = "https://www.ffwp.org/member/login.php"
+MAIN_URL = "https://www.ffwp.org/main.php"
+KORHQ_HOME = "https://korhq.ffwp.org/"
 BOARD_URL = "https://korhq.ffwp.org/official/?sType=ffwp"
 
 
@@ -64,6 +64,17 @@ def send_discord_alert(number, title, doc_id):
         print("⚠ 디스코드 전송 실패:", e)
 
 
+def dump_cookies(context):
+    print("===== 현재 쿠키 =====")
+    try:
+        cookies = context.cookies()
+        for c in cookies:
+            print(f"{c.get('name')}={c.get('value')} | domain={c.get('domain')}")
+    except Exception as e:
+        print("쿠키 출력 실패:", e)
+    print("====================")
+
+
 def get_latest_post():
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -71,25 +82,56 @@ def get_latest_post():
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-gpu"
+                "--disable-gpu",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process"
             ]
         )
 
-        page = browser.new_page()
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+            viewport={"width": 1366, "height": 768},
+            locale="ko-KR",
+            timezone_id="Asia/Seoul"
+        )
+
+        page = context.new_page()
+
+        # 자동화 흔적 숨기기
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['ko-KR', 'ko', 'en-US', 'en']
+            });
+            Object.defineProperty(navigator, 'platform', {
+                get: () => 'Win32'
+            });
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+        """)
+
+        # 공통 헤더 흉내
+        context.set_extra_http_headers({
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Upgrade-Insecure-Requests": "1"
+        })
 
         # 1) 로그인 페이지
         page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
         print("로그인 페이지 접근 성공")
         print("현재 URL:", page.url)
 
-        # 2) 로그인 입력창 대기
         page.wait_for_selector("input[name='userid']", timeout=15000)
 
-        # 3) 로그인
+        # 2) 로그인
         page.fill("input[name='userid']", os.environ['FFWP_USER'])
         page.fill("input[name='password']", os.environ['FFWP_PW'])
         page.click("#loginSubmit")
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(5000)
 
         print("로그인 후 URL:", page.url)
         try:
@@ -97,24 +139,63 @@ def get_latest_post():
         except:
             pass
 
-        # 4) 게시판 접근
-        page.goto(BOARD_URL, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(5000)
+        dump_cookies(context)
 
-        print("게시판 접근 후 URL:", page.url)
+        # 3) 메인 페이지 한 번 더 명시적으로
+        page.goto(MAIN_URL, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)
+        print("메인 페이지 URL:", page.url)
+
+        # 4) korhq 홈 먼저 접근
+        page.goto(KORHQ_HOME, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(5000)
+        print("KORHQ 홈 접근 후 URL:", page.url)
         try:
-            print("페이지 제목:", page.title())
+            print("KORHQ 홈 제목:", page.title())
+        except:
+            pass
+
+        dump_cookies(context)
+
+        # 5) official 진입 1차
+        page.goto(BOARD_URL, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(7000)
+        print("게시판 접근 후 URL(1차):", page.url)
+
+        # 6) 실패 시 새 탭 + referer 흐름으로 재시도
+        if "official" not in page.url:
+            print("⚠ 1차 진입 실패 → 새 탭 방식 재시도")
+            page2 = context.new_page()
+            page2.goto(KORHQ_HOME, wait_until="domcontentloaded", timeout=60000)
+            page2.wait_for_timeout(3000)
+            page2.goto(BOARD_URL, wait_until="domcontentloaded", timeout=60000)
+            page2.wait_for_timeout(7000)
+            print("게시판 접근 후 URL(2차):", page2.url)
+            page = page2
+
+        # 7) 실패 시 JS location 이동 재시도
+        if "official" not in page.url:
+            print("⚠ 2차 진입 실패 → JS 이동 재시도")
+            page.goto(KORHQ_HOME, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(3000)
+            page.evaluate(f"window.location.href = '{BOARD_URL}'")
+            page.wait_for_timeout(7000)
+            print("게시판 접근 후 URL(3차):", page.url)
+
+        try:
+            print("최종 페이지 제목:", page.title())
         except:
             pass
 
         html = page.content()
-        print("페이지 HTML 일부:", html[:2000])
+        print("페이지 HTML 일부:", html[:3000])
+
+        dump_cookies(context)
 
         browser.close()
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # 최신 번호
     total_elem = soup.select_one("#listTotNum")
     if not total_elem:
         print("❌ #listTotNum 못 찾음")
@@ -122,17 +203,14 @@ def get_latest_post():
 
     latest_number = int(total_elem.get_text(strip=True))
 
-    # 첫 번째 게시글
     first_row = soup.select_one("li.c_list_tr")
     if not first_row:
         print("❌ 첫 번째 게시글 행 못 찾음")
         return None
 
-    # 제목
     title_elem = first_row.select_one(".list_tit")
     latest_title = title_elem.get_text(strip=True) if title_elem else "(제목 없음)"
 
-    # 문서 ID
     doc_id = None
     a_tag = first_row.select_one("a[href*='goView']")
     if a_tag and a_tag.has_attr("href"):
