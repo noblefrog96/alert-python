@@ -141,11 +141,23 @@ with sync_playwright() as p:
         print("메인 페이지 URL:", page.url)
         print("메인 페이지 제목:", page.title())
 
-        # 3) 게시판 진입
-        page.goto(BOARD_URL, wait_until="domcontentloaded", timeout=60000)
-        time.sleep(5)  # 사이트가 느릴 수 있으므로 추가 대기
-        print("게시판 접근 후 URL:", page.url)
-        print("페이지 제목:", page.title())
+# 3) 게시판 진입 (직접 goto 대신 브라우저 이동 방식 흉내)
+page.evaluate(f"window.location.href = '{BOARD_URL}'")
+page.wait_for_timeout(7000)
+
+print("게시판 접근 후 URL:", page.url)
+print("페이지 제목:", page.title())
+
+# 한 번 더 강제로 이동 시도
+if "official" not in page.url:
+    print("⚠ 첫 진입 실패 → 새 탭 방식 재시도")
+    new_page = context.new_page()
+    new_page.goto(BOARD_URL, wait_until="domcontentloaded", timeout=60000)
+    new_page.wait_for_timeout(7000)
+    page = new_page
+
+print("재확인 URL:", page.url)
+print("재확인 제목:", page.title())
 
         # 혹시 JS 후처리 기다림
         page.wait_for_load_state("networkidle", timeout=30000)
