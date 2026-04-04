@@ -20,6 +20,8 @@ LOGIN_URL = "https://www.ffwp.org/member/login.php"
 MAIN_URL = "https://www.ffwp.org/main.php"
 KORHQ_HOME = "https://korhq.ffwp.org/"
 BOARD_URL = "https://korhq.ffwp.org/official/?sType=ffwp"
+BOARD_URL_ALT1 = "https://korhq.ffwp.org/official/"
+BOARD_URL_ALT2 = "https://korhq.ffwp.org/official/?#contents"
 
 
 def load_last_seen():
@@ -73,6 +75,89 @@ def dump_cookies(context):
     except Exception as e:
         print("쿠키 출력 실패:", e)
     print("====================")
+
+
+def try_click_navigation(page, context):
+    """
+    메인 페이지 안에서 사람이 링크 클릭한 것처럼 korhq 게시판 이동 시도
+    """
+    print("🔁 클릭 기반 이동 시도 시작")
+
+    # 1차: 동일 탭 클릭
+    page.goto(MAIN_URL, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(3000)
+    print("메인 페이지 URL:", page.url)
+
+    page.evaluate(f"""
+        (() => {{
+            const old = document.getElementById('korhq_link_injected');
+            if (old) old.remove();
+
+            const a = document.createElement('a');
+            a.href = "{BOARD_URL}";
+            a.id = "korhq_link_injected";
+            a.target = "_self";
+            a.textContent = "go korhq";
+            document.body.appendChild(a);
+        }})();
+    """)
+
+    page.click("#korhq_link_injected")
+    page.wait_for_timeout(7000)
+    print("게시판 접근 후 URL(클릭 1차):", page.url)
+
+    if "official" in page.url:
+        return page
+
+    # 2차: 새 탭 클릭
+    print("⚠ 클릭 1차 실패 → 새 탭 클릭 재시도")
+    page.goto(MAIN_URL, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(3000)
+
+    page.evaluate(f"""
+        (() => {{
+            const old = document.getElementById('korhq_link_injected_2');
+            if (old) old.remove();
+
+            const a = document.createElement('a');
+            a.href = "{BOARD_URL}";
+            a.id = "korhq_link_injected_2";
+            a.target = "_blank";
+            a.textContent = "go korhq blank";
+            document.body.appendChild(a);
+        }})();
+    """)
+
+    try:
+        with context.expect_page(timeout=10000) as new_page_info:
+            page.click("#korhq_link_injected_2")
+
+        page2 = new_page_info.value
+        page2.wait_for_load_state("domcontentloaded", timeout=60000)
+        page2.wait_for_timeout(7000)
+        print("게시판 접근 후 URL(클릭 2차):", page2.url)
+
+        if "official" in page2.url:
+            return page2
+    except Exception as e:
+        print("⚠ 새 탭 클릭 실패:", e)
+
+    # 3차: official 루트
+    print("⚠ 클릭 2차 실패 → official 루트 접근 재시도")
+    page.goto(BOARD_URL_ALT1, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(7000)
+    print("게시판 접근 후 URL(루트 3차):", page.url)
+
+    if "official" in page.url:
+        return page
+
+    # 4차: #contents 버전
+    print("⚠ 루트 3차 실패 → #contents 주소 재시도")
+    page.goto(BOARD_URL_ALT2, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(7000)
+    print("게시판 접근 후 URL(#contents 4차):", page.url)
+
+    return page
 
 
 def get_latest_post():
@@ -157,30 +242,35 @@ def get_latest_post():
 
         dump_cookies(context)
 
-        # 5) official 진입 1차
+        # 5) 기존 직접 진입 1차
         page.goto(BOARD_URL, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(7000)
-        print("게시판 접근 후 URL(1차):", page.url)
+        print("게시판 접근 후 URL(직접 1차):", page.url)
 
-        # 6) 실패 시 새 탭 + referer 흐름으로 재시도
+        # 6) 기존 직접 진입 2차
         if "official" not in page.url:
-            print("⚠ 1차 진입 실패 → 새 탭 방식 재시도")
+            print("⚠ 직접 1차 실패 → 새 탭 직접 진입 재시도")
             page2 = context.new_page()
             page2.goto(KORHQ_HOME, wait_until="domcontentloaded", timeout=60000)
             page2.wait_for_timeout(3000)
             page2.goto(BOARD_URL, wait_until="domcontentloaded", timeout=60000)
             page2.wait_for_timeout(7000)
-            print("게시판 접근 후 URL(2차):", page2.url)
+            print("게시판 접근 후 URL(직접 2차):", page2.url)
             page = page2
 
-        # 7) 실패 시 JS location 이동 재시도
+        # 7) 기존 직접 진입 3차
         if "official" not in page.url:
-            print("⚠ 2차 진입 실패 → JS 이동 재시도")
+            print("⚠ 직접 2차 실패 → JS 이동 재시도")
             page.goto(KORHQ_HOME, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
             page.evaluate(f"window.location.href = '{BOARD_URL}'")
             page.wait_for_timeout(7000)
-            print("게시판 접근 후 URL(3차):", page.url)
+            print("게시판 접근 후 URL(직접 3차):", page.url)
+
+        # 8) 최종 fallback: 클릭 흐름 기반 이동
+        if "official" not in page.url:
+            print("⚠ 직접 진입 전부 실패 → 클릭 기반 우회 시도")
+            page = try_click_navigation(page, context)
 
         try:
             print("최종 페이지 제목:", page.title())
