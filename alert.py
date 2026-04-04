@@ -1,25 +1,16 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import time
+from playwright.sync_api import sync_playwright
 import requests
 import os
 import re
 import subprocess
 import sys
+import time
 
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
 
 
-def safe_exit(driver=None, code=0):
-    try:
-        if driver:
-            driver.quit()
-    except:
-        pass
+def safe_exit(code=0):
     sys.exit(code)
 
 
@@ -31,119 +22,123 @@ subprocess.run([
     f"https://x-access-token:{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
 ])
 
-# Chrome 설정
-options = Options()
-options.add_argument('--headless')
-options.add_argument('--no-sandbox')
-options.add_argument('--disable-dev-shm-usage')
-options.add_argument('--disable-gpu')
-options.add_argument('--window-size=1920,1080')
-options.add_argument('--disable-blink-features=AutomationControlled')
 
-driver = webdriver.Chrome(options=options)
-
-# -------------------------
-# 1) 로그인 (www)
-# -------------------------
-try:
-    driver.get('https://www.ffwp.org/member/login.php')
-except Exception as e:
-    print("❌ 로그인 페이지 로드 실패:", e)
-    safe_exit(driver)
-
-try:
-    driver.find_element(By.NAME, 'userid').send_keys(os.environ['FFWP_USER'])
-    driver.find_element(By.NAME, 'password').send_keys(os.environ['FFWP_PW'])
-    driver.find_element(By.ID, 'loginSubmit').click()
-    time.sleep(3)
-except Exception as e:
-    print("❌ 로그인 실패:", e)
-    safe_exit(driver)
-
-print("로그인 후 URL:", driver.current_url)
-
-if "login" in driver.current_url.lower():
-    print("❌ 로그인 실패 감지")
-    safe_exit(driver)
-
-# -------------------------
-# 2) 게시판 접근 (핵심 수정)
-# -------------------------
-driver.get('https://korhq.ffwp.org/official/?sType=ffwp')
-time.sleep(3)
-
-# 👉 korhq에서 로그인 요구 시 재로그인
-if "login" in driver.current_url.lower():
-    print("🔐 korhq 도메인 재로그인 필요")
-
-    try:
-        driver.find_element(By.NAME, 'userid').clear()
-        driver.find_element(By.NAME, 'userid').send_keys(os.environ['FFWP_USER'])
-        driver.find_element(By.NAME, 'password').clear()
-        driver.find_element(By.NAME, 'password').send_keys(os.environ['FFWP_PW'])
-        driver.find_element(By.ID, 'loginSubmit').click()
-        time.sleep(3)
-    except Exception as e:
-        print("❌ korhq 로그인 실패:", e)
-        safe_exit(driver)
-
-# 다시 게시판 접근
-driver.get('https://korhq.ffwp.org/official/?sType=ffwp')
-
-try:
-    WebDriverWait(driver, 60).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, 'ul.pub_list li.c_list_tr'))
+with sync_playwright() as p:
+    browser = p.chromium.launch(
+        headless=True,
+        args=[
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-dev-shm-usage'
+        ]
     )
-except Exception as e:
-    print("❌ 게시판 로딩 실패:", e)
-    print("현재 URL:", driver.current_url)
-    safe_exit(driver)
 
-# -------------------------
-# 3) 게시글 수집
-# -------------------------
-elements = driver.find_elements(By.CSS_SELECTOR, 'ul.pub_list li.c_list_tr')
-posts = []
+    context = browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        locale="ko-KR",
+        viewport={"width": 1920, "height": 1080}
+    )
 
-for el in elements:
+    page = context.new_page()
+
+    # -------------------------
+    # 1) 로그인
+    # -------------------------
     try:
-        title = el.find_element(By.CSS_SELECTOR, 'span.list_tit').text.strip()
-        raw_href = el.find_element(By.TAG_NAME, 'a').get_attribute('href')
+        page.goto("https://www.ffwp.org/member/login.php", wait_until="domcontentloaded", timeout=60000)
+        page.fill('input[name="userid"]', os.environ['FFWP_USER'])
+        page.fill('input[name="password"]', os.environ['FFWP_PW'])
+        page.click('#loginSubmit')
+        page.wait_for_timeout(3000)
+    except Exception as e:
+        print("❌ 로그인 실패:", e)
+        page.screenshot(path="debug_login_fail.png")
+        browser.close()
+        safe_exit(0)
 
-        post_id = None
-        post_url = None
+    print("로그인 후 URL:", page.url)
 
-        if raw_href.startswith("javascript:goView"):
-            m = re.search(r"goView\((\d+)\)", raw_href)
-            if m:
-                post_id = m.group(1)
-                post_url = f"https://korhq.ffwp.org/official/?mode=view&pageType=officialList&sPage=1&sType=ffwp&document={post_id}#contents"
-        else:
-            m = re.search(r'document=(\d+)', raw_href)
-            if m:
-                post_id = m.group(1)
-                post_url = raw_href
+    if "login" in page.url.lower():
+        print("❌ 로그인 실패 감지")
+        page.screenshot(path="debug_login_still_on_login.png")
+        browser.close()
+        safe_exit(0)
 
-        if post_id:
-            posts.append({
-                'id': post_id,
-                'title': title,
-                'href': post_url
-            })
+    # -------------------------
+    # 2) 게시판 접근
+    # -------------------------
+    try:
+        page.goto("https://korhq.ffwp.org/official/?sType=ffwp", wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(5000)
+    except Exception as e:
+        print("❌ 게시판 URL 접속 실패:", e)
+        page.screenshot(path="debug_board_goto_fail.png")
+        browser.close()
+        safe_exit(0)
 
-    except:
-        continue
+    print("게시판 접근 후 URL:", page.url)
+    print("페이지 제목:", page.title())
 
-driver.quit()
+    try:
+        page.wait_for_selector("ul.pub_list li.c_list_tr", timeout=60000)
+    except Exception as e:
+        print("❌ 게시판 로딩 실패:", e)
+        print("현재 URL:", page.url)
+        print("페이지 제목:", page.title())
+        page.screenshot(path="debug_board_fail.png")
+        with open("debug_board_fail.html", "w", encoding="utf-8") as f:
+            f.write(page.content())
+        browser.close()
+        safe_exit(0)
 
+    # -------------------------
+    # 3) 게시글 수집
+    # -------------------------
+    elements = page.query_selector_all("ul.pub_list li.c_list_tr")
+    posts = []
+
+    for el in elements:
+        try:
+            title = el.query_selector("span.list_tit").inner_text().strip()
+            raw_href = el.query_selector("a").get_attribute("href")
+
+            post_id = None
+            post_url = None
+
+            if raw_href and raw_href.startswith("javascript:goView"):
+                m = re.search(r"goView\((\d+)\)", raw_href)
+                if m:
+                    post_id = m.group(1)
+                    post_url = f"https://korhq.ffwp.org/official/?mode=view&pageType=officialList&sPage=1&sType=ffwp&document={post_id}#contents"
+            elif raw_href:
+                m = re.search(r'document=(\d+)', raw_href)
+                if m:
+                    post_id = m.group(1)
+                    post_url = raw_href
+
+            if post_id:
+                posts.append({
+                    'id': post_id,
+                    'title': title,
+                    'href': post_url
+                })
+
+        except Exception as e:
+            print("⚠ 게시글 파싱 스킵:", e)
+            continue
+
+    browser.close()
+
+# 게시글 없으면 종료
 if not posts:
     print("❌ 게시글 0개 → 종료")
-    sys.exit(0)
+    safe_exit(0)
 
 posts.sort(key=lambda x: int(x['id']), reverse=True)
 
 print("📄 게시글 수:", len(posts))
 print("🆕 최신 ID:", posts[0]['id'])
+print("📝 최신 제목:", posts[0]['title'])
 
 # -------------------------
 # 4) last_seen
@@ -156,19 +151,19 @@ else:
 
 print("💾 last_seen:", last_seen)
 
-# 이상값 방지
 if last_seen and not last_seen.isdigit():
+    print("⚠ last_seen 비정상 → 초기화")
     with open(LAST_SEEN_FILE, 'w') as f:
         f.write(posts[0]['id'])
-    sys.exit(0)
+    safe_exit(0)
 
 current_ids = [p['id'] for p in posts]
 
 if last_seen and last_seen not in current_ids:
-    print("⚠ 기준 초기화")
+    print("⚠ 기준 글이 현재 페이지에 없음 → 초기화")
     with open(LAST_SEEN_FILE, 'w') as f:
         f.write(posts[0]['id'])
-    sys.exit(0)
+    safe_exit(0)
 
 # -------------------------
 # 5) 새 글 필터
@@ -182,17 +177,24 @@ if last_seen:
         to_notify.append(p)
 
 print("🔔 새 글 수:", len(to_notify))
+for p in to_notify[:5]:
+    print(f"➡ {p['id']} | {p['title']}")
 
 # -------------------------
 # 6) 디스코드 전송
 # -------------------------
+if not to_notify:
+    print("ℹ️ 새 글 없음 → 디스코드 전송 안 함")
+
 for p in reversed(to_notify):
     try:
-        requests.post(WEBHOOK_URL, json={
-            'content': f"📢 **[공지 알림]**\n제목: {p['title']}\n링크: {p['href']}"
-        }, timeout=10)
+        requests.post(
+            WEBHOOK_URL,
+            json={'content': f"📢 **[공지 알림]**\n제목: {p['title']}\n링크: {p['href']}"},
+            timeout=10
+        )
     except Exception as e:
-        print("⚠ 디스코드 실패:", e)
+        print("⚠ 디스코드 전송 실패:", e)
 
 # -------------------------
 # 7) last_seen 업데이트
