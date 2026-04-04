@@ -2,7 +2,7 @@ name: 게시판 알림
 
 on:
   schedule:
-    - cron: '*/10 * * * *'   # 10분마다 추천
+    - cron: '*/10 * * * *'   # 10분마다
   workflow_dispatch:
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install requests playwright
-        playwright install chromium
+        python -m playwright install chromium
 
     - name: Run alert script
       env:
@@ -31,13 +31,3 @@ jobs:
         GH_PAT: ${{ secrets.GH_PAT }}
         FFWP_COOKIES: ${{ secrets.FFWP_COOKIES }}
       run: python alert.py
-
-    - name: Upload debug artifacts
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: debug-files
-        path: |
-          debug_*.html
-          debug_*.png
-        if-no-files-found: ignore
