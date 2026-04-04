@@ -2,7 +2,7 @@ name: 게시판 알림
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/10 * * * *'   # 10분마다 실행
   workflow_dispatch:
 
 jobs:
@@ -20,14 +20,19 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Install Chrome
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+
     - name: Install dependencies
       run: |
-        pip install requests playwright
-        python -m playwright install chromium
+        pip install selenium requests webdriver-manager
 
     - name: Run alert script
       env:
+        FFWP_USER: ${{ secrets.FFWP_USER }}
+        FFWP_PW: ${{ secrets.FFWP_PW }}
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         GH_PAT: ${{ secrets.GH_PAT }}
-        FFWP_STORAGE_STATE: ${{ secrets.FFWP_STORAGE_STATE }}
       run: python alert.py
