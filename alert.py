@@ -5,131 +5,107 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
-# =========================
-# 환경변수
-# =========================
-FFWP_ID = os.environ.get("FFWP_ID")
-FFWP_PW = os.environ.get("FFWP_PW")
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-GH_PAT = os.environ.get("GH_PAT")
-
-LOGIN_URL = "https://www.ffwp.org/member/login.php"
-BOARD_URL = "https://korhq.ffwp.org/official/?sType=ffwp"
-
-LAST_SEEN_FILE = "last_seen.txt"
-
+WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
+LAST_SEEN_FILE = 'last_seen.txt'
 
 # =========================
 # Git 설정
 # =========================
-def setup_git():
-    if not GH_PAT:
-        print("⚠ GH_PAT 없음 → git push 생략")
-        return False
+subprocess.run(['git', 'config', '--global', 'user.name', 'noblefrog96'])
+subprocess.run(['git', 'config', '--global', 'user.email', 'noblefrog96@gmail.com'])
+subprocess.run([
+    'git', 'remote', 'set-url', 'origin',
+    f"https://x-access-token:{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
+])
 
-    subprocess.run(["git", "config", "--global", "user.name", "noblefrog96"], check=False)
-    subprocess.run(["git", "config", "--global", "user.email", "noblefrog96@gmail.com"], check=False)
-    subprocess.run([
-        "git", "remote", "set-url", "origin",
-        f"https://x-access-token:{GH_PAT}@github.com/noblefrog96/alert-python.git"
-    ], check=False)
-
-    return True
+LOGIN_URL = "https://www.ffwp.org/member/login.php"
+BOARD_URL = "https://korhq.ffwp.org/official/?sType=ffwp"
 
 
-# =========================
-# 마지막 확인 번호 읽기/쓰기
-# =========================
 def load_last_seen():
-    if not os.path.exists(LAST_SEEN_FILE):
-        return None
-    try:
-        with open(LAST_SEEN_FILE, "r", encoding="utf-8") as f:
-            value = f.read().strip()
-            return int(value) if value else None
-    except:
-        return None
+    if os.path.exists(LAST_SEEN_FILE):
+        with open(LAST_SEEN_FILE, 'r', encoding='utf-8') as f:
+            val = f.read().strip()
+            return int(val) if val.isdigit() else None
+    return None
 
 
 def save_last_seen(num):
-    with open(LAST_SEEN_FILE, "w", encoding="utf-8") as f:
+    with open(LAST_SEEN_FILE, 'w', encoding='utf-8') as f:
         f.write(str(num))
 
 
 def git_commit_and_push(newest_num):
-    if not setup_git():
-        return
-
     try:
-        subprocess.run(["git", "add", LAST_SEEN_FILE], check=True)
+        subprocess.run(['git', 'add', LAST_SEEN_FILE], check=True)
         subprocess.run(
-            ["git", "commit", "-m", f"Update last_seen.txt to {newest_num}"],
+            ['git', 'commit', '-m', f'Update last_seen.txt to {newest_num}'],
             check=True
         )
-        subprocess.run(["git", "push"], check=True)
+        subprocess.run(['git', 'push'], check=True)
         print("✅ last_seen.txt 커밋 & 푸시 완료")
     except subprocess.CalledProcessError as e:
         print("⚠ git 작업 실패 (알림은 정상 동작 가능):", e)
 
 
-# =========================
-# Discord 알림
-# =========================
 def send_discord_alert(number, title, doc_id):
-    if not DISCORD_WEBHOOK_URL:
-        print("❌ DISCORD_WEBHOOK_URL 없음")
-        return
+    view_url = (
+        "https://korhq.ffwp.org/official/"
+        f"?mode=view&pageType=officialList&sPage=1&sType=ffwp"
+        f"&sCategory=&listSearch=&document={doc_id}#contents"
+    )
 
-    view_url = f"https://korhq.ffwp.org/official?mode=view&sType=ffwp&document={doc_id}#contents"
+    msg = f"📢 **[공지 알림]**\n번호: {number}\n제목: {title}\n링크: {view_url}"
 
-    content = {
-        "content": (
-            f"📢 **새 공문 감지!**\n\n"
-            f"**번호:** {number}\n"
-            f"**제목:** {title}\n"
-            f"**링크:** {view_url}"
-        )
-    }
-
-    r = requests.post(DISCORD_WEBHOOK_URL, json=content, timeout=15)
-    print("디스코드 전송 상태:", r.status_code)
-    print("디스코드 응답:", r.text[:300])
+    try:
+        r = requests.post(WEBHOOK_URL, json={'content': msg}, timeout=10)
+        print("디스코드 전송 상태:", r.status_code)
+    except Exception as e:
+        print("⚠ 디스코드 전송 실패:", e)
 
 
-# =========================
-# 최신 게시글 가져오기
-# =========================
 def get_latest_post():
-    if not FFWP_ID or not FFWP_PW:
-        print("❌ FFWP_ID / FFWP_PW 환경변수 없음")
-        return None
-
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu"
+            ]
+        )
+
         page = browser.new_page()
 
-        # 1) 로그인 페이지 접근
+        # 1) 로그인 페이지
         page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
         print("로그인 페이지 접근 성공")
         print("현재 URL:", page.url)
 
-        # 2) 로그인 폼 입력
-        page.fill("input[name='id']", FFWP_ID)
-        page.fill("input[name='pw']", FFWP_PW)
+        # 2) 로그인 입력창 대기
+        page.wait_for_selector("input[name='userid']", timeout=15000)
 
-        # 3) 로그인 제출
-        page.click("button[type='submit']")
+        # 3) 로그인
+        page.fill("input[name='userid']", os.environ['FFWP_USER'])
+        page.fill("input[name='password']", os.environ['FFWP_PW'])
+        page.click("#loginSubmit")
         page.wait_for_timeout(3000)
 
         print("로그인 후 URL:", page.url)
-        print("로그인 후 제목:", page.title())
+        try:
+            print("로그인 후 제목:", page.title())
+        except:
+            pass
 
-        # 4) 게시판 직접 접근
+        # 4) 게시판 접근
         page.goto(BOARD_URL, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(5000)
 
         print("게시판 접근 후 URL:", page.url)
-        print("페이지 제목:", page.title())
+        try:
+            print("페이지 제목:", page.title())
+        except:
+            pass
 
         html = page.content()
         print("페이지 HTML 일부:", html[:2000])
@@ -138,7 +114,7 @@ def get_latest_post():
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # 최신 게시글 번호
+    # 최신 번호
     total_elem = soup.select_one("#listTotNum")
     if not total_elem:
         print("❌ #listTotNum 못 찾음")
@@ -146,7 +122,7 @@ def get_latest_post():
 
     latest_number = int(total_elem.get_text(strip=True))
 
-    # 첫 번째 게시글 행
+    # 첫 번째 게시글
     first_row = soup.select_one("li.c_list_tr")
     if not first_row:
         print("❌ 첫 번째 게시글 행 못 찾음")
@@ -156,11 +132,11 @@ def get_latest_post():
     title_elem = first_row.select_one(".list_tit")
     latest_title = title_elem.get_text(strip=True) if title_elem else "(제목 없음)"
 
-    # document ID 추출
-    a_tag = first_row.select_one("a[href*='goView']")
+    # 문서 ID
     doc_id = None
+    a_tag = first_row.select_one("a[href*='goView']")
     if a_tag and a_tag.has_attr("href"):
-        href = a_tag["href"]  # javascript:goView(10706);
+        href = a_tag["href"]
         m = re.search(r"goView\((\d+)\)", href)
         if m:
             doc_id = m.group(1)
@@ -176,9 +152,6 @@ def get_latest_post():
     }
 
 
-# =========================
-# 메인 실행
-# =========================
 def main():
     latest = get_latest_post()
     if not latest:
