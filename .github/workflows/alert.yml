@@ -2,7 +2,7 @@ name: 게시판 알림
 
 on:
   schedule:
-    - cron: '*/10 * * * *'   # 10분마다
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -30,8 +30,8 @@ jobs:
 
     - name: Run alert script
       env:
-        FFWP_ID: ${{ secrets.FFWP_ID }}
+        FFWP_USER: ${{ secrets.FFWP_USER }}
         FFWP_PW: ${{ secrets.FFWP_PW }}
-        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         GH_PAT: ${{ secrets.GH_PAT }}
       run: python alert.py
