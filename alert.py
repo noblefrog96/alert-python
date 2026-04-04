@@ -4,10 +4,11 @@ import os
 import re
 import subprocess
 import sys
-import time
+import json
 
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
+COOKIES_JSON = os.environ['FFWP_COOKIES']
 
 
 def safe_exit(code=0):
@@ -22,6 +23,12 @@ subprocess.run([
     f"https://x-access-token:{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
 ])
 
+# 쿠키 로드
+try:
+    cookies = json.loads(COOKIES_JSON)
+except Exception as e:
+    print("❌ 쿠키 JSON 파싱 실패:", e)
+    safe_exit(0)
 
 with sync_playwright() as p:
     browser = p.chromium.launch(
@@ -39,33 +46,19 @@ with sync_playwright() as p:
         viewport={"width": 1920, "height": 1080}
     )
 
+    # 쿠키 주입
+    try:
+        context.add_cookies(cookies)
+        print("✅ 쿠키 주입 완료")
+    except Exception as e:
+        print("❌ 쿠키 주입 실패:", e)
+        browser.close()
+        safe_exit(0)
+
     page = context.new_page()
 
     # -------------------------
-    # 1) 로그인
-    # -------------------------
-    try:
-        page.goto("https://www.ffwp.org/member/login.php", wait_until="domcontentloaded", timeout=60000)
-        page.fill('input[name="userid"]', os.environ['FFWP_USER'])
-        page.fill('input[name="password"]', os.environ['FFWP_PW'])
-        page.click('#loginSubmit')
-        page.wait_for_timeout(3000)
-    except Exception as e:
-        print("❌ 로그인 실패:", e)
-        page.screenshot(path="debug_login_fail.png")
-        browser.close()
-        safe_exit(0)
-
-    print("로그인 후 URL:", page.url)
-
-    if "login" in page.url.lower():
-        print("❌ 로그인 실패 감지")
-        page.screenshot(path="debug_login_still_on_login.png")
-        browser.close()
-        safe_exit(0)
-
-    # -------------------------
-    # 2) 게시판 접근
+    # 게시판 접근
     # -------------------------
     try:
         page.goto("https://korhq.ffwp.org/official/?sType=ffwp", wait_until="domcontentloaded", timeout=60000)
@@ -92,7 +85,7 @@ with sync_playwright() as p:
         safe_exit(0)
 
     # -------------------------
-    # 3) 게시글 수집
+    # 게시글 수집
     # -------------------------
     elements = page.query_selector_all("ul.pub_list li.c_list_tr")
     posts = []
@@ -141,7 +134,7 @@ print("🆕 최신 ID:", posts[0]['id'])
 print("📝 최신 제목:", posts[0]['title'])
 
 # -------------------------
-# 4) last_seen
+# last_seen 읽기
 # -------------------------
 if os.path.exists(LAST_SEEN_FILE):
     with open(LAST_SEEN_FILE, 'r') as f:
@@ -151,6 +144,7 @@ else:
 
 print("💾 last_seen:", last_seen)
 
+# 이상값 방지
 if last_seen and not last_seen.isdigit():
     print("⚠ last_seen 비정상 → 초기화")
     with open(LAST_SEEN_FILE, 'w') as f:
@@ -166,7 +160,7 @@ if last_seen and last_seen not in current_ids:
     safe_exit(0)
 
 # -------------------------
-# 5) 새 글 필터
+# 새 글 필터
 # -------------------------
 to_notify = []
 
@@ -181,7 +175,7 @@ for p in to_notify[:5]:
     print(f"➡ {p['id']} | {p['title']}")
 
 # -------------------------
-# 6) 디스코드 전송
+# 디스코드 전송
 # -------------------------
 if not to_notify:
     print("ℹ️ 새 글 없음 → 디스코드 전송 안 함")
@@ -197,7 +191,7 @@ for p in reversed(to_notify):
         print("⚠ 디스코드 전송 실패:", e)
 
 # -------------------------
-# 7) last_seen 업데이트
+# last_seen 업데이트
 # -------------------------
 newest_id = posts[0]['id']
 
