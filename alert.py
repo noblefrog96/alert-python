@@ -112,15 +112,39 @@ def extract_posts(html):
 # 브라우저 실행
 # =========================
 with sync_playwright() as p:
-    browser = p.chromium.launch(
-        headless=True,
-        args=["--disable-blink-features=AutomationControlled"]
-    )
+browser = p.chromium.launch(
+    headless=True,
+    args=[
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process"
+    ]
+)
 
-    context = browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-    )
-    page = context.new_page()
+context = browser.new_context(
+    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    viewport={"width": 1366, "height": 768},
+    locale="ko-KR",
+    timezone_id="Asia/Seoul"
+)
+
+page = context.new_page()
+
+# 자동화 흔적 숨기기
+page.add_init_script("""
+Object.defineProperty(navigator, 'webdriver', {
+    get: () => undefined
+});
+Object.defineProperty(navigator, 'languages', {
+    get: () => ['ko-KR', 'ko', 'en-US', 'en']
+});
+Object.defineProperty(navigator, 'platform', {
+    get: () => 'Win32'
+});
+""")
 
     try:
         # 1) 로그인 페이지
