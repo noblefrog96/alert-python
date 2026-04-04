@@ -22,11 +22,13 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install requests
+        pip install playwright requests
+        python -m playwright install chromium
 
     - name: Run alert script
       env:
+        FFWP_USER: ${{ secrets.FFWP_USER }}
+        FFWP_PW: ${{ secrets.FFWP_PW }}
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         GH_PAT: ${{ secrets.GH_PAT }}
-        FFWP_COOKIE: ${{ secrets.FFWP_COOKIE }}
       run: python alert.py
