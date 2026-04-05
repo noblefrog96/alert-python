@@ -314,14 +314,12 @@ def main():
     if last_seen is None:
         print("⚠ 최초 실행 → 현재 번호 저장만 하고 종료")
         save_last_seen(current_num)
-        git_commit_and_push(current_num)
         return
 
     if current_num > last_seen:
         print("✅ 새 글 감지!")
         send_discord_alert(current_num, current_title, current_doc_id)
         save_last_seen(current_num)
-        git_commit_and_push(current_num)
     else:
         print("변경 없음")
 
