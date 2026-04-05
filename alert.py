@@ -1,20 +1,11 @@
 import os
 import re
-import subprocess
 import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK']
 LAST_SEEN_FILE = 'last_seen.txt'
-
-# Git 설정
-subprocess.run(['git', 'config', '--global', 'user.name', 'noblefrog96'])
-subprocess.run(['git', 'config', '--global', 'user.email', 'noblefrog96@gmail.com'])
-subprocess.run([
-    'git', 'remote', 'set-url', 'origin',
-    f"https://x-access-token:{os.environ['GH_PAT']}@github.com/noblefrog96/alert-python.git"
-])
 
 LOGIN_URL = "https://www.ffwp.org/member/login.php"
 MAIN_URL = "https://www.ffwp.org/main.php"
@@ -35,19 +26,6 @@ def load_last_seen():
 def save_last_seen(num):
     with open(LAST_SEEN_FILE, 'w', encoding='utf-8') as f:
         f.write(str(num))
-
-
-def git_commit_and_push(newest_num):
-    try:
-        subprocess.run(['git', 'add', LAST_SEEN_FILE], check=True)
-        subprocess.run(
-            ['git', 'commit', '-m', f'Update last_seen.txt to {newest_num}'],
-            check=True
-        )
-        subprocess.run(['git', 'push'], check=True)
-        print("✅ last_seen.txt 커밋 & 푸시 완료")
-    except subprocess.CalledProcessError as e:
-        print("⚠ git 작업 실패 (알림은 정상 동작 가능):", e)
 
 
 def send_discord_alert(number, title, doc_id):
